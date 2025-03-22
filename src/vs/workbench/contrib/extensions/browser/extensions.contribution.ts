@@ -80,6 +80,7 @@ import { IConfigurationMigrationRegistry, Extensions as ConfigurationMigrationEx
 import { IProductService } from '../../../../platform/product/common/productService.js';
 import { IUserDataProfilesService } from '../../../../platform/userDataProfile/common/userDataProfile.js';
 import product from '../../../../platform/product/common/product.js';
+import { ExtensionGalleryResourceType, ExtensionGalleryServiceUrlConfigKey, getExtensionGalleryManifestResourceUri, IExtensionGalleryManifest, IExtensionGalleryManifestService } from '../../../../platform/extensionManagement/common/extensionGalleryManifest.js';
 
 // Singletons
 registerSingleton(IExtensionsWorkbenchService, ExtensionsWorkbenchService, InstantiationType.Eager /* Auto updates extensions */);
@@ -278,6 +279,18 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration)
 				default: true,
 				scope: ConfigurationScope.APPLICATION,
 				tags: ['onExp', 'usesOnlineServices']
+			},
+			[ExtensionGalleryServiceUrlConfigKey]: {
+				type: 'string',
+				description: localize('extensions.gallery.serviceUrl', "Configure the Marketplace service URL to connect to"),
+				default: '',
+				scope: ConfigurationScope.APPLICATION,
+				tags: ['usesOnlineServices'],
+				included: false,
+				policy: {
+					name: 'ExtensionGalleryServiceUrl',
+					minimumVersion: '1.99',
+				},
 			},
 			[AllowedExtensionsConfigKey]: {
 				// Note: Type is set only to object because to support policies generation during build time, where single type is expected.
@@ -549,6 +562,7 @@ export const CONTEXT_HAS_WEB_SERVER = new RawContextKey<boolean>('hasWebServer',
 const CONTEXT_GALLERY_SORT_CAPABILITIES = new RawContextKey<string>('gallerySortCapabilities', '');
 const CONTEXT_GALLERY_FILTER_CAPABILITIES = new RawContextKey<string>('galleryFilterCapabilities', '');
 const CONTEXT_GALLERY_ALL_REPOSITORY_SIGNED = new RawContextKey<boolean>('galleryAllRepositorySigned', false);
+const CONTEXT_GALLERY_HAS_EXTENSION_LINK = new RawContextKey<boolean>('galleryHasExtensionLink', false);
 
 async function runAction(action: IAction): Promise<void> {
 	try {
@@ -569,7 +583,8 @@ class ExtensionsContributions extends Disposable implements IWorkbenchContributi
 
 	constructor(
 		@IExtensionManagementServerService private readonly extensionManagementServerService: IExtensionManagementServerService,
-		@IExtensionGalleryService private readonly extensionGalleryService: IExtensionGalleryService,
+		@IExtensionGalleryService extensionGalleryService: IExtensionGalleryService,
+		@IExtensionGalleryManifestService extensionGalleryManifestService: IExtensionGalleryManifestService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IViewsService private readonly viewsService: IViewsService,
 		@IExtensionsWorkbenchService private readonly extensionsWorkbenchService: IExtensionsWorkbenchService,
@@ -600,17 +615,21 @@ class ExtensionsContributions extends Disposable implements IWorkbenchContributi
 			hasWebServerContext.set(true);
 		}
 
-		this.registerGalleryCapabilitiesContexts();
+		extensionGalleryManifestService.getExtensionGalleryManifest()
+			.then(extensionGalleryManifest => {
+				this.registerGalleryCapabilitiesContexts(extensionGalleryManifest);
+				this._register(extensionGalleryManifestService.onDidChangeExtensionGalleryManifest(extensionGalleryManifest => this.registerGalleryCapabilitiesContexts(extensionGalleryManifest)));
+			});
 		this.registerGlobalActions();
 		this.registerContextMenuActions();
 		this.registerQuickAccessProvider();
 	}
 
-	private async registerGalleryCapabilitiesContexts(): Promise<void> {
-		const capabilities = await this.extensionGalleryService.getCapabilities();
-		CONTEXT_GALLERY_SORT_CAPABILITIES.bindTo(this.contextKeyService).set(`_${capabilities.query.sortBy.join('_')}_UpdateDate_`);
-		CONTEXT_GALLERY_FILTER_CAPABILITIES.bindTo(this.contextKeyService).set(`_${capabilities.query.filters.join('_')}_`);
-		CONTEXT_GALLERY_ALL_REPOSITORY_SIGNED.bindTo(this.contextKeyService).set(capabilities.allRepositorySigned);
+	private async registerGalleryCapabilitiesContexts(extensionGalleryManifest: IExtensionGalleryManifest | null): Promise<void> {
+		CONTEXT_GALLERY_SORT_CAPABILITIES.bindTo(this.contextKeyService).set(`_${extensionGalleryManifest?.capabilities.extensionQuery.sorting?.map(s => s.name)?.join('_')}_UpdateDate_`);
+		CONTEXT_GALLERY_FILTER_CAPABILITIES.bindTo(this.contextKeyService).set(`_${extensionGalleryManifest?.capabilities.extensionQuery.filtering?.map(s => s.name)?.join('_')}_`);
+		CONTEXT_GALLERY_ALL_REPOSITORY_SIGNED.bindTo(this.contextKeyService).set(!!extensionGalleryManifest?.capabilities?.signing?.allRepositorySigned);
+		CONTEXT_GALLERY_HAS_EXTENSION_LINK.bindTo(this.contextKeyService).set(!!(extensionGalleryManifest && getExtensionGalleryManifestResourceUri(extensionGalleryManifest, ExtensionGalleryResourceType.ExtensionDetailsViewUri)));
 	}
 
 	private registerQuickAccessProvider(): void {
@@ -1656,7 +1675,7 @@ class ExtensionsContributions extends Disposable implements IWorkbenchContributi
 			menu: {
 				id: MenuId.ExtensionContext,
 				group: '1_copy',
-				when: ContextKeyExpr.has('isGalleryExtension'),
+				when: ContextKeyExpr.and(ContextKeyExpr.has('isGalleryExtension'), CONTEXT_GALLERY_HAS_EXTENSION_LINK),
 			},
 			run: async (accessor: ServicesAccessor, _, extension: IExtensionArg) => {
 				const clipboardService = accessor.get(IClipboardService);

@@ -29,6 +29,7 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
 import { KeybindingWeight } from '../../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { ILabelService } from '../../../../../platform/label/common/label.js';
+import { ILogService } from '../../../../../platform/log/common/log.js';
 import { AnythingQuickAccessProviderRunOptions } from '../../../../../platform/quickinput/common/quickAccess.js';
 import { IQuickInputService, IQuickPickItem, IQuickPickItemWithResource, IQuickPickSeparator, QuickPickItem } from '../../../../../platform/quickinput/common/quickInput.js';
 import { ActiveEditorContext, TextCompareEditorActiveContext } from '../../../../common/contextkeys.js';
@@ -48,12 +49,13 @@ import { isSearchTreeFileMatch, isSearchTreeMatch } from '../../../search/browse
 import { SearchView } from '../../../search/browser/searchView.js';
 import { ISymbolQuickPickItem, SymbolsQuickAccessProvider } from '../../../search/browser/symbolsQuickAccess.js';
 import { SearchContext } from '../../../search/common/constants.js';
-import { ChatAgentLocation, IChatAgentService } from '../../common/chatAgents.js';
+import { IChatAgentService } from '../../common/chatAgents.js';
 import { ChatContextKeyExprs, ChatContextKeys } from '../../common/chatContextKeys.js';
 import { IChatEditingService } from '../../common/chatEditingService.js';
 import { IChatRequestVariableEntry, IDiagnosticVariableEntryFilterData } from '../../common/chatModel.js';
 import { ChatRequestAgentPart } from '../../common/chatParserTypes.js';
 import { IChatVariablesService } from '../../common/chatVariables.js';
+import { ChatAgentLocation } from '../../common/constants.js';
 import { ILanguageModelToolsService } from '../../common/languageModelToolsService.js';
 import { IChatWidget, IChatWidgetService, IQuickChatService, showChatView, showEditsView } from '../chat.js';
 import { imageToHash, isImage } from '../chatPasteProviders.js';
@@ -73,6 +75,7 @@ export function registerChatContextActions() {
 	registerAction2(AttachFileToEditingSessionAction);
 	registerAction2(AttachFolderToEditingSessionAction);
 	registerAction2(AttachSelectionToEditingSessionAction);
+	registerAction2(AttachSearchResultAction);
 }
 
 /**
@@ -296,7 +299,7 @@ class AttachFileToChatAction extends AttachResourceAction {
 				id: MenuId.SearchContext,
 				group: 'z_chat',
 				order: 1,
-				when: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.or(ActiveEditorContext.isEqualTo(TEXT_FILE_EDITOR_ID), TextCompareEditorActiveContext)),
+				when: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.or(ActiveEditorContext.isEqualTo(TEXT_FILE_EDITOR_ID), TextCompareEditorActiveContext), SearchContext.SearchResultHeaderFocused.negate()),
 			}]
 		});
 	}
@@ -412,7 +415,8 @@ class AttachFileToEditingSessionAction extends AttachResourceAction {
 				when: ContextKeyExpr.and(
 					ChatContextKeys.enabled,
 					ContextKeyExpr.or(ActiveEditorContext.isEqualTo(TEXT_FILE_EDITOR_ID), TextCompareEditorActiveContext),
-					ChatContextKeyExprs.unifiedChatEnabled.negate()),
+					ChatContextKeyExprs.unifiedChatEnabled.negate(),
+					SearchContext.SearchResultHeaderFocused.negate()),
 			}]
 		});
 	}
@@ -426,6 +430,58 @@ class AttachFileToEditingSessionAction extends AttachResourceAction {
 			for (const file of files) {
 				variablesService.attachContext('file', file, ChatAgentLocation.EditingSession);
 			}
+		}
+	}
+}
+
+export class AttachSearchResultAction extends Action2 {
+	static readonly Name = 'searchResults';
+	static readonly ID = 'workbench.action.chat.insertSearchResults';
+
+	constructor() {
+		super({
+			id: AttachSearchResultAction.ID,
+			title: localize2('chat.insertSearchResults', 'Add Search Results to Chat'),
+			category: CHAT_CATEGORY,
+			f1: false,
+			menu: [{
+				id: MenuId.SearchContext,
+				group: 'z_chat',
+				order: 3,
+				when: ContextKeyExpr.and(
+					ChatContextKeys.enabled,
+					SearchContext.SearchResultHeaderFocused),
+			}]
+		});
+	}
+	async run(accessor: ServicesAccessor, ...args: any[]) {
+		const logService = accessor.get(ILogService);
+		const widget = (await showChatView(accessor.get(IViewsService)));
+
+		if (!widget) {
+			logService.trace('InsertSearchResultAction: no chat view available');
+			return;
+		}
+
+		const editor = widget.inputEditor;
+		const originalRange = editor.getSelection() ?? editor.getModel()?.getFullModelRange().collapseToEnd();
+
+		if (!originalRange) {
+			logService.trace('InsertSearchResultAction: no selection');
+			return;
+		}
+
+		let insertText = `#${AttachSearchResultAction.Name}`;
+		const varRange = new Range(originalRange.startLineNumber, originalRange.startColumn, originalRange.endLineNumber, originalRange.startColumn + insertText.length);
+		// check character before the start of the range. If it's not a space, add a space
+		const model = editor.getModel();
+		if (model && model.getValueInRange(new Range(originalRange.startLineNumber, originalRange.startColumn - 1, originalRange.startLineNumber, originalRange.startColumn)) !== ' ') {
+			insertText = ' ' + insertText;
+		}
+		const success = editor.executeEdits('chatInsertSearch', [{ range: varRange, text: insertText + ' ' }]);
+		if (!success) {
+			logService.trace(`InsertSearchResultAction: failed to insert "${insertText}"`);
+			return;
 		}
 	}
 }
@@ -515,7 +571,8 @@ export class AttachContextAction extends Action2 {
 			{
 				when: ChatContextKeyExprs.inNonUnifiedPanel,
 				id: MenuId.ChatInputAttachmentToolbar,
-				group: 'navigation'
+				group: 'navigation',
+				order: 2
 			}
 		]
 	}) {
@@ -1027,7 +1084,8 @@ registerAction2(class AttachFilesAction extends AttachContextAction {
 			menu: {
 				when: ChatContextKeyExprs.inEditsOrUnified,
 				id: MenuId.ChatInputAttachmentToolbar,
-				group: 'navigation'
+				group: 'navigation',
+				order: 3
 			},
 			icon: Codicon.attach,
 			precondition: ChatContextKeyExprs.inEditsOrUnified,
