@@ -4,10 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 export enum ChatConfiguration {
-	UnifiedChatView = 'chat.unifiedChatView',
 	UseFileStorage = 'chat.useFileStorage',
 	AgentEnabled = 'chat.agent.enabled',
 	Edits2Enabled = 'chat.edits2.enabled',
+	ExtensionToolsEnabled = 'chat.extensionTools.enabled',
 }
 
 export enum ChatMode {
@@ -34,6 +34,7 @@ export enum ChatAgentLocation {
 	Terminal = 'terminal',
 	Notebook = 'notebook',
 	Editor = 'editor',
+	// TODO@roblourens Delete
 	EditingSession = 'editing-session',
 }
 

@@ -3,24 +3,25 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { DOCS_OPTION } from './constants.js';
-import { IChatWidget } from '../../../../chat.js';
-import { attachPrompts } from './utils/attachPrompts.js';
-import { handleButtonClick } from './utils/handleButtonClick.js';
-import { URI } from '../../../../../../../../base/common/uri.js';
 import { assert } from '../../../../../../../../base/common/assert.js';
-import { createPromptPickItem } from './utils/createPromptPickItem.js';
-import { createPlaceholderText } from './utils/createPlaceholderText.js';
+import { DisposableStore } from '../../../../../../../../base/common/lifecycle.js';
 import { extUri } from '../../../../../../../../base/common/resources.js';
 import { WithUriValue } from '../../../../../../../../base/common/types.js';
-import { IPromptPath } from '../../../../../common/promptSyntax/service/types.js';
-import { DisposableStore } from '../../../../../../../../base/common/lifecycle.js';
+import { URI } from '../../../../../../../../base/common/uri.js';
+import { ICommandService } from '../../../../../../../../platform/commands/common/commands.js';
+import { IDialogService } from '../../../../../../../../platform/dialogs/common/dialogs.js';
 import { IFileService } from '../../../../../../../../platform/files/common/files.js';
 import { ILabelService } from '../../../../../../../../platform/label/common/label.js';
 import { IOpenerService } from '../../../../../../../../platform/opener/common/opener.js';
-import { IViewsService } from '../../../../../../../services/views/common/viewsService.js';
-import { IDialogService } from '../../../../../../../../platform/dialogs/common/dialogs.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../../../../../platform/quickinput/common/quickInput.js';
+import { IViewsService } from '../../../../../../../services/views/common/viewsService.js';
+import { IPromptPath } from '../../../../../common/promptSyntax/service/types.js';
+import { IChatWidget } from '../../../../chat.js';
+import { DOCS_OPTION } from './constants.js';
+import { attachPrompts } from './utils/attachPrompts.js';
+import { createPlaceholderText } from './utils/createPlaceholderText.js';
+import { createPromptPickItem } from './utils/createPromptPickItem.js';
+import { handleButtonClick } from './utils/handleButtonClick.js';
 
 /**
  * Options for the {@link askToSelectPrompt} function.
@@ -52,6 +53,7 @@ export interface ISelectPromptOptions {
 	readonly viewsService: IViewsService;
 	readonly openerService: IOpenerService;
 	readonly dialogService: IDialogService;
+	readonly commandService: ICommandService;
 	readonly quickInputService: IQuickInputService;
 }
 
@@ -151,7 +153,6 @@ export const askToSelectPrompt = async (
 		// handle the prompt `accept` event
 		disposables.add(quickPick.onDidAccept(async (event) => {
 			const { selectedItems } = quickPick;
-			const { alt, ctrlCmd } = quickPick.keyMods;
 
 			// sanity check to confirm our expectations
 			assert(
@@ -164,16 +165,15 @@ export const askToSelectPrompt = async (
 			// whether user selected the docs link option
 			const docsSelected = (selectedOption === DOCS_OPTION);
 
-			// if `super` key was pressed, open the selected prompt file
-			// in editor or the documentation link in a browser
-			if (ctrlCmd || docsSelected) {
+			// if documentation item was selected, open its link in a browser
+			if (docsSelected) {
 				// note that opening a file in editor also hides(disposes) the dialog
 				await openerService.open(selectedOption.value);
 				return;
 			}
 
 			// otherwise attach the selected prompt to a chat input
-			lastActiveWidget = await attachPrompts(selectedItems, options, alt);
+			lastActiveWidget = await attachPrompts(selectedItems, options, quickPick.keyMods);
 
 			// if user submitted their selection, close the dialog
 			if (!event.inBackground) {
